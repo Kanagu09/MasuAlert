@@ -29,7 +29,6 @@
 
 #include "library/bme280.h"
 
-
 const char *TAG = "main";
 
 //----------------------------------------------------------------
@@ -332,10 +331,40 @@ void hapticFunc(void *arg) {
     static double omega = 0; //  angular frequency
     static double B = 0;     //  damping coefficient
     int ad = 0;
+    int tmp = 0;
+    int raw[8];
+
+    /* -------- */
+    uint8_t osrs_t = 1;   // Temperature oversampling x 1
+    uint8_t osrs_p = 1;   // Pressure oversampling x 1
+    uint8_t osrs_h = 1;   // Humidity oversampling x 1
+    uint8_t mode = 3;     // Normal mode
+    uint8_t t_sb = 5;     // Tstandby 1000ms
+    uint8_t filter = 0;   // Filter off
+    uint8_t spi3w_en = 0; // 3-wire SPI Disable
+
+    uint8_t ctrl_meas_reg = (osrs_t << 5) | (osrs_p << 2) | mode;
+    uint8_t config_reg = (t_sb << 5) | (filter << 2) | spi3w_en;
+    uint8_t ctrl_hum_reg = osrs_h;
+
+    uint8_t reg_addr = 0xF2;
+    // bme280_set_regs(&reg_addr, &ctrl_meas_reg, 1,
+    //                 struct bme280_dev *dev);
 
     /* -------- */
     // int ad = adc1_get_raw(ADC1_CHANNEL_6);
-    ad = adc1_get_raw(ADC1_CHANNEL_6);
+    // ad = adc1_get_raw(ADC1_CHANNEL_6); // GPIO34
+    ad = adc1_get_raw(ADC1_CHANNEL_7); // GPIO35
+
+    for(int i = 0; i < 8; i++) {
+        raw[i] = (ad >> (4 * i)) & 15;
+    }
+
+    tmp = (raw[3] << 12) | (raw[4] << 4) | (raw[5] >> 4);
+    printf("ad = %d\n", ad);
+    printf("%d, %d, %d\n", raw[3], raw[4], raw[5]);
+    printf("temp = %d\n", tmp);
+
     ad_w = ad;
 
     /* -------- */
@@ -351,8 +380,8 @@ void hapticFunc(void *arg) {
         omega = freq_value * M_PI * 2;
         // omega = wave.freq[i % wave.nFreq] * M_PI * 2;
         B = wave.damp[i / wave.nFreq];
-        printf("Wave: %3.1fHz, A=%2.2f, B=%3.1f ", omega / (M_PI * 2),
-               wave.amplitude, B);
+        // printf("Wave: %3.1fHz, A=%2.2f, B=%3.1f ", omega / (M_PI * 2),
+        //        wave.amplitude, B);
         i++;
         if(i >= wave.nFreq * wave.nDamp)
             i = 0;
@@ -365,25 +394,6 @@ void hapticFunc(void *arg) {
     } else {
         pwm = 0;
     }
-    //  Rotating direction
-    if(pwm > 0) {
-        gpio_set_level(GPIO_NUM_5, 0);
-        gpio_set_level(GPIO_NUM_17, 1);
-#ifndef USE_TIMER
-        if(time_c >= 0)
-            printf("+");
-#endif
-    } else {
-        gpio_set_level(GPIO_NUM_5, 1);
-        gpio_set_level(GPIO_NUM_17, 0);
-        pwm = -pwm;
-#ifndef USE_TIMER
-        if(time_c >= 0)
-            printf("-");
-#endif
-    }
-    if(pwm > 1)
-        pwm = 1;
 
     //  Set duty rate of pwm
     mcpwm_set_duty(MCPWM_UNIT_0, MCPWM_TIMER_0, MCPWM_OPR_A, pwm * 100);
@@ -400,7 +410,7 @@ void hapticFunc(void *arg) {
 void hapticTask(void *arg) {
     while(1) {
         hapticFunc(arg);
-        vTaskDelay(1);
+        vTaskDelay(1 / portTICK_PERIOD_MS);
     }
 }
 #endif
@@ -435,6 +445,7 @@ extern "C" void app_main()
     ESP_LOGI("main", "Initialize WiFi");
     initialise_wifi();
     //----------------------------------
+
     printf("!!! Active Haptic Feedback Start !!!\n");
 
     ESP_LOGI("main", "Initialize ADC");
