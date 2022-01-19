@@ -1,4 +1,5 @@
 /* Active click feedback Example */
+#include "driver/i2c.h"
 #include <driver/adc.h>
 #include <driver/mcpwm.h>
 #include <driver/uart.h>
@@ -28,6 +29,8 @@
 #include <cJSON.h>
 
 #include "library/bme280.h"
+// #include "library/_i2c.h"
+#include "library/I2Cbus.hpp"
 
 const char *TAG = "main";
 
@@ -40,6 +43,25 @@ int ad_w = 0;
 int count = 0;
 
 double freq_value = 200.0;
+
+uint16_t dig_T1;
+int16_t dig_T2;
+int16_t dig_T3;
+uint16_t dig_P1;
+int16_t dig_P2;
+int16_t dig_P3;
+int16_t dig_P4;
+int16_t dig_P5;
+int16_t dig_P6;
+int16_t dig_P7;
+int16_t dig_P8;
+int16_t dig_P9;
+int8_t dig_H1;
+int16_t dig_H2;
+int8_t dig_H3;
+int16_t dig_H4;
+int16_t dig_H5;
+int8_t dig_H6;
 
 //----------------------------------------------------------------
 /* The examples use simple WiFi configuration that you can set via
@@ -325,18 +347,60 @@ struct WaveParam {
 
 double time_c = -1;
 
+signed long int t_fine;
+
+signed long int calibration_T(signed long int adc_T) {
+
+    signed long int var1, var2, T;
+    var1 = ((((adc_T >> 3) - ((signed long int)dig_T1 << 1))) *
+            ((signed long int)dig_T2)) >>
+           11;
+    var2 = (((((adc_T >> 4) - ((signed long int)dig_T1)) *
+              ((adc_T >> 4) - ((signed long int)dig_T1))) >>
+             12) *
+            ((signed long int)dig_T3)) >>
+           14;
+
+    t_fine = var1 + var2;
+    T = (t_fine * 5 + 128) >> 8;
+    return T;
+}
+
+unsigned long int calibration_H(signed long int adc_H) {
+    signed long int v_x1;
+
+    v_x1 = (t_fine - ((signed long int)76800));
+    v_x1 = (((((adc_H << 14) - (((signed long int)dig_H4) << 20) -
+               (((signed long int)dig_H5) * v_x1)) +
+              ((signed long int)16384)) >>
+             15) *
+            (((((((v_x1 * ((signed long int)dig_H6)) >> 10) *
+                 (((v_x1 * ((signed long int)dig_H3)) >> 11) +
+                  ((signed long int)32768))) >>
+                10) +
+               ((signed long int)2097152)) *
+                  ((signed long int)dig_H2) +
+              8192) >>
+             14));
+    v_x1 =
+        (v_x1 -
+         (((((v_x1 >> 15) * (v_x1 >> 15)) >> 7) * ((signed long int)dig_H1)) >>
+          4));
+    v_x1 = (v_x1 < 0 ? 0 : v_x1);
+    v_x1 = (v_x1 > 419430400 ? 419430400 : v_x1);
+    return (unsigned long int)(v_x1 >> 12);
+}
+
 void hapticFunc(void *arg) {
     const char *TAG = "H_FUNC";
     static int i;            //  An integer to select waveform.
     static double omega = 0; //  angular frequency
     static double B = 0;     //  damping coefficient
     int ad = 0;
-    int tmp = 0;
-    int raw[8];
 
     /* -------- */
     uint8_t osrs_t = 1;   // Temperature oversampling x 1
-    uint8_t osrs_p = 1;   // Pressure oversampling x 1
+    uint8_t osrs_p = 0;   // Pressure oversampling x 1
     uint8_t osrs_h = 1;   // Humidity oversampling x 1
     uint8_t mode = 3;     // Normal mode
     uint8_t t_sb = 5;     // Tstandby 1000ms
@@ -345,25 +409,67 @@ void hapticFunc(void *arg) {
 
     uint8_t ctrl_meas_reg = (osrs_t << 5) | (osrs_p << 2) | mode;
     uint8_t config_reg = (t_sb << 5) | (filter << 2) | spi3w_en;
-    uint8_t ctrl_hum_reg = osrs_h;
+    uint8_t ctrl_meas_regctrl_hum_reg = osrs_h;
 
-    uint8_t reg_addr = 0xF2;
-    // bme280_set_regs(&reg_addr, &ctrl_meas_reg, 1,
-    //                 struct bme280_dev *dev);
+    I2C_t &myI2C = i2c0;
+    myI2C.begin(GPIO_NUM_25, GPIO_NUM_21, 50000);
+
+    // myI2C.setTimeout(10);
+    // myI2C.scanner();
+
+    myI2C.writeByte(0x76, 0xF2, ctrl_meas_regctrl_hum_reg);
+    myI2C.writeByte(0x76, 0xF4, ctrl_meas_reg);
+    myI2C.writeByte(0x76, 0xF5, config_reg);
+
+    // mpu9250_register_write_byte(0xF2, ctrl_meas_reg);
 
     /* -------- */
-    // int ad = adc1_get_raw(ADC1_CHANNEL_6);
-    // ad = adc1_get_raw(ADC1_CHANNEL_6); // GPIO34
-    ad = adc1_get_raw(ADC1_CHANNEL_7); // GPIO35
-
+    // read
+    uint8_t raw[8];
     for(int i = 0; i < 8; i++) {
-        raw[i] = (ad >> (4 * i)) & 15;
+        myI2C.readByte(0x76, 0xF7 + i, &raw[i]);
     }
 
-    tmp = (raw[3] << 12) | (raw[4] << 4) | (raw[5] >> 4);
-    printf("ad = %d\n", ad);
+    unsigned long int tmp_raw = (raw[3] << 12) | (raw[4] << 4) | (raw[5] >> 4);
+    unsigned long int hum_raw = (raw[6] << 8) | raw[7];
     printf("%d, %d, %d\n", raw[3], raw[4], raw[5]);
-    printf("temp = %d\n", tmp);
+    printf("%d, %d\n", raw[6], raw[7]);
+
+    // calibration
+    uint8_t data[33];
+    for(int i = 0; i < 24; i++) {
+        myI2C.readByte(0x76, 0x88 + i, &data[i]);
+    }
+    myI2C.readByte(0x76, 0xA1, &data[24]);
+
+    for(int i = 0; i < 8; i++) {
+        myI2C.readByte(0x76, 0xE1 + i, &data[25 + i]);
+    }
+
+    dig_T1 = (data[1] << 8) | data[0];
+    dig_T2 = (data[3] << 8) | data[2];
+    dig_T3 = (data[5] << 8) | data[4];
+    dig_P1 = (data[7] << 8) | data[6];
+    dig_P2 = (data[9] << 8) | data[8];
+    dig_P3 = (data[11] << 8) | data[10];
+    dig_P4 = (data[13] << 8) | data[12];
+    dig_P5 = (data[15] << 8) | data[14];
+    dig_P6 = (data[17] << 8) | data[16];
+    dig_P7 = (data[19] << 8) | data[18];
+    dig_P8 = (data[21] << 8) | data[20];
+    dig_P9 = (data[23] << 8) | data[22];
+    dig_H1 = data[24];
+    dig_H2 = (data[26] << 8) | data[25];
+    dig_H3 = data[27];
+    dig_H4 = (data[28] << 4) | (0x0F & data[29]);
+    dig_H5 = (data[30] << 4) | ((data[29] >> 4) & 0x0F);
+    dig_H6 = data[31];
+
+    signed long int tmp = calibration_T(tmp_raw);
+    signed long int hum = calibration_H(hum_raw);
+
+    printf("tmp = %f\n", (double)tmp / 100);
+    printf("hum = %f\n", (double)hum / 1024);
 
     ad_w = ad;
 
@@ -445,7 +551,9 @@ extern "C" void app_main()
     ESP_LOGI("main", "Initialize WiFi");
     initialise_wifi();
     //----------------------------------
+    // i2c_master_init();
 
+    //----------------------------------
     printf("!!! Active Haptic Feedback Start !!!\n");
 
     ESP_LOGI("main", "Initialize ADC");
