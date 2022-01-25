@@ -56,9 +56,9 @@ int16_t dig_P6;
 int16_t dig_P7;
 int16_t dig_P8;
 int16_t dig_P9;
-int8_t dig_H1;
+uint8_t dig_H1;
 int16_t dig_H2;
-int8_t dig_H3;
+uint8_t dig_H3;
 int16_t dig_H4;
 int16_t dig_H5;
 int8_t dig_H6;
@@ -412,10 +412,10 @@ void hapticFunc(void *arg) {
     uint8_t ctrl_meas_regctrl_hum_reg = osrs_h;
 
     I2C_t &myI2C = i2c0;
-    myI2C.begin(GPIO_NUM_25, GPIO_NUM_21, 50000);
+    myI2C.begin(GPIO_NUM_25, GPIO_NUM_21);
 
-    // myI2C.setTimeout(10);
-    // myI2C.scanner();
+    myI2C.setTimeout(10);
+    myI2C.scanner();
 
     myI2C.writeByte(0x76, 0xF2, ctrl_meas_regctrl_hum_reg);
     myI2C.writeByte(0x76, 0xF4, ctrl_meas_reg);
@@ -438,12 +438,16 @@ void hapticFunc(void *arg) {
     // calibration
     uint8_t data[33];
     for(int i = 0; i < 24; i++) {
+        // printf("%d -> ", data[i]);
         myI2C.readByte(0x76, 0x88 + i, &data[i]);
+        // printf("%d\n", data[i]);
     }
     myI2C.readByte(0x76, 0xA1, &data[24]);
 
     for(int i = 0; i < 8; i++) {
+        // printf("%d -> ", data[25 + i]);
         myI2C.readByte(0x76, 0xE1 + i, &data[25 + i]);
+        // printf("%d\n", data[25 + i]);
     }
 
     dig_T1 = (data[1] << 8) | data[0];
@@ -516,7 +520,7 @@ void hapticFunc(void *arg) {
 void hapticTask(void *arg) {
     while(1) {
         hapticFunc(arg);
-        vTaskDelay(1 / portTICK_PERIOD_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
 #endif
