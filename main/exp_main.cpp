@@ -28,9 +28,8 @@
 
 #include <cJSON.h>
 
-#include "library/bme280.h"
-// #include "library/_i2c.h"
 #include "library/I2Cbus.hpp"
+#include "library/bme280.h"
 
 const char *TAG = "main";
 
@@ -39,6 +38,9 @@ const char *TAG = "main";
 #define MAX_COUNT 1000
 
 int ad_w = 0;
+
+double tmp_w = 0;
+double hum_w = 0;
 
 int count = 0;
 
@@ -286,34 +288,34 @@ static void http_get_task(void *pvParameters) {
             strcat(buf, recv_buf);
         } while(r > 0);
         /* ------------------------*/
-        // printf("Buffer %s\n", buf);
-        cJSON *root = NULL;
-        char *bufptr;
+        // // printf("Buffer %s\n", buf);
+        // cJSON *root = NULL;
+        // char *bufptr;
 
-        for(bufptr = buf; *bufptr != '\0' && *bufptr != '{'; bufptr++)
-            ;
-        if(*bufptr == '{') {
-            //   printf("Buffer stripped %s\n", bufptr);
-            root = cJSON_Parse(bufptr);
-            if(root == NULL) {
-                ESP_LOGE(TAG, "... received wrong json format");
-                continue;
-            }
-            if(cJSON_GetObjectItem(root, "freq") == NULL) {
-                ESP_LOGE(TAG, "... freq not found");
-                continue;
-            }
-            //    printf("freq: %s\n", cJSON_Print(cJSON_GetObjectItem(root,
-            //    "freq")));
-            freq_value = atof(cJSON_Print(cJSON_GetObjectItem(root, "freq")));
-            printf("received freq_value = %lf\n", freq_value);
-            /* check the received freq_value */
-            if(freq_value < 100)
-                freq_value = 100;
-            else if(freq_value > 500)
-                freq_value = 500;
-            printf(" modified freq_value = %lf\n", freq_value);
-        }
+        // for(bufptr = buf; *bufptr != '\0' && *bufptr != '{'; bufptr++)
+        //     ;
+        // if(*bufptr == '{') {
+        //     //   printf("Buffer stripped %s\n", bufptr);
+        //     root = cJSON_Parse(bufptr);
+        //     if(root == NULL) {
+        //         ESP_LOGE(TAG, "... received wrong json format");
+        //         continue;
+        //     }
+        //     if(cJSON_GetObjectItem(root, "freq") == NULL) {
+        //         ESP_LOGE(TAG, "... freq not found");
+        //         continue;
+        //     }
+        //     //    printf("freq: %s\n", cJSON_Print(cJSON_GetObjectItem(root,
+        //     //    "freq")));
+        //     freq_value = atof(cJSON_Print(cJSON_GetObjectItem(root,
+        //     "freq"))); printf("received freq_value = %lf\n", freq_value);
+        //     /* check the received freq_value */
+        //     if(freq_value < 100)
+        //         freq_value = 100;
+        //     else if(freq_value > 500)
+        //         freq_value = 500;
+        //     printf(" modified freq_value = %lf\n", freq_value);
+        // }
 
         ESP_LOGI(
             TAG,
@@ -336,16 +338,6 @@ static void http_get_task(void *pvParameters) {
 //  In the case of the task, the time period is the time slice of the OS
 //  specified in menuconfig, which is set to 1 ms=1 kHz.
 #endif
-
-struct WaveParam {
-    const double damp[3] = {-10, -20, -30};
-    const int nDamp = sizeof(damp) / sizeof(damp[0]);
-    const double freq[4] = {100, 200, 300, 500};
-    const int nFreq = sizeof(freq) / sizeof(freq[0]);
-    const double amplitude = 2;
-} wave; //
-
-double time_c = -1;
 
 signed long int t_fine;
 
@@ -392,13 +384,6 @@ unsigned long int calibration_H(signed long int adc_H) {
 }
 
 void hapticFunc(void *arg) {
-    const char *TAG = "H_FUNC";
-    static int i;            //  An integer to select waveform.
-    static double omega = 0; //  angular frequency
-    static double B = 0;     //  damping coefficient
-    int ad = 0;
-
-    /* -------- */
     uint8_t osrs_t = 1;   // Temperature oversampling x 1
     uint8_t osrs_p = 0;   // Pressure oversampling x 1
     uint8_t osrs_h = 1;   // Humidity oversampling x 1
@@ -421,9 +406,6 @@ void hapticFunc(void *arg) {
     myI2C.writeByte(0x76, 0xF4, ctrl_meas_reg);
     myI2C.writeByte(0x76, 0xF5, config_reg);
 
-    // mpu9250_register_write_byte(0xF2, ctrl_meas_reg);
-
-    /* -------- */
     // read
     uint8_t raw[8];
     for(int i = 0; i < 8; i++) {
@@ -472,48 +454,11 @@ void hapticFunc(void *arg) {
     signed long int tmp = calibration_T(tmp_raw);
     signed long int hum = calibration_H(hum_raw);
 
-    printf("tmp = %f\n", (double)tmp / 100);
-    printf("hum = %f\n", (double)hum / 1024);
+    tmp_w = (double)tmp / 100.0;
+    hum_w = (double)hum / 1024.0;
 
-    ad_w = ad;
-
-    /* -------- */
-    if(ad < 2100 && time_c > 0.3) {
-        time_c = -1;
-        printf("\r\n");
-    }
-    if(ad > 2400 && time_c == -1) { //  When the button is pushed after
-                                    //  finishing to output an wave.
-        //  set the time_c to 0 and update the waveform parameters.
-        time_c = 0;
-        // Frequency
-        omega = freq_value * M_PI * 2;
-        // omega = wave.freq[i % wave.nFreq] * M_PI * 2;
-        B = wave.damp[i / wave.nFreq];
-        // printf("Wave: %3.1fHz, A=%2.2f, B=%3.1f ", omega / (M_PI * 2),
-        //        wave.amplitude, B);
-        i++;
-        if(i >= wave.nFreq * wave.nDamp)
-            i = 0;
-    }
-    //  Output the wave
-    double pwm = 0;
-    if(time_c >= 0) {
-        pwm = wave.amplitude * cos(omega * time_c) * exp(B * time_c);
-        time_c += DT;
-    } else {
-        pwm = 0;
-    }
-
-    //  Set duty rate of pwm
-    mcpwm_set_duty(MCPWM_UNIT_0, MCPWM_TIMER_0, MCPWM_OPR_A, pwm * 100);
-    mcpwm_set_duty_type(MCPWM_UNIT_0, MCPWM_TIMER_0, MCPWM_OPR_A,
-                        MCPWM_DUTY_MODE_0);
-    count++;
-    if(count >= 1000) {
-        ESP_LOGI(TAG, "count 1000 : ADC %d count %d", ad, count);
-        count = 0;
-    }
+    printf("tmp = %f\n", tmp_w);
+    printf("hum = %f\n", hum_w);
 }
 
 #ifndef USE_TIMER
@@ -554,36 +499,8 @@ extern "C" void app_main()
     //----------------------------------
     ESP_LOGI("main", "Initialize WiFi");
     initialise_wifi();
-    //----------------------------------
-    // i2c_master_init();
 
     //----------------------------------
-    printf("!!! Active Haptic Feedback Start !!!\n");
-
-    ESP_LOGI("main", "Initialize ADC");
-    adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
-    ESP_LOGI("main", "Initialize PWM");
-    // 1. mcpwm gpio initialization
-    const int GPIO_PWM0A_OUT = 16;
-    mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM0A, GPIO_PWM0A_OUT);
-    // 2. initial mcpwm configuration
-    printf("Configuring Initial Parameters of mcpwm...\n");
-    mcpwm_config_t pwm_config;
-    pwm_config.frequency = 1000; // frequency = 1000Hz,
-    pwm_config.cmpr_a = 0;       // duty cycle of PWMxA = 0
-    pwm_config.counter_mode = MCPWM_UP_COUNTER;
-    pwm_config.duty_mode = MCPWM_DUTY_MODE_0;
-    mcpwm_init(MCPWM_UNIT_0, MCPWM_TIMER_0,
-               &pwm_config); // Configure PWM0A with above settings
-    mcpwm_set_frequency(MCPWM_UNIT_0, MCPWM_TIMER_0, 20000);
-    gpio_config_t conf;
-    conf.pin_bit_mask = (1 << (17)) | (1 << (5));
-    conf.mode = GPIO_MODE_OUTPUT;
-    conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    conf.intr_type = GPIO_INTR_DISABLE;
-    gpio_config(&conf);
 
 #ifdef USE_TIMER
     esp_timer_init();
