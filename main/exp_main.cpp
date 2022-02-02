@@ -39,8 +39,10 @@ const char *TAG = "main";
 
 int ad_w = 0;
 
-double tmp_w = 0;
-double hum_w = 0;
+// double tmp_w = 0;
+// double hum_w = 0;
+int tmp_w = 0;
+int hum_w = 0;
 
 int count = 0;
 
@@ -89,10 +91,8 @@ const int CONNECTED_BIT = BIT0;
 // #define WIFI_PASS "espwroom32"
 #define WIFI_SSID "ICT_EX5_1"
 #define WIFI_PASS "embedded"
-// **** need to rewrite for your RPi ****
-// RPi Flask
-#define WEB_SERVER "10.0.0.75"
-#define WEB_URL "http://10.0.0.75:50000/getadc?"
+#define WEB_SERVER "10.0.0.59"
+#define WEB_URL "http://10.0.0.59:50000/gettemp?TEMP="
 #define WEB_PORT "50000"
 // **** need to rewrite for your RPi ****
 //
@@ -254,8 +254,11 @@ static void http_get_task(void *pvParameters) {
         //  get adc value from global var.
 
         strcpy(REQUEST, REQUEST1);
-        sprintf(REQUEST + strlen(REQUEST), "ADC=%d", ad_w);
+        sprintf(REQUEST + strlen(REQUEST), "%d", tmp_w);
+        sprintf(REQUEST + strlen(REQUEST), "&HUMID=%d", hum_w);
+        // sprintf(REQUEST + strlen(REQUEST), "&PRESS=%f", pressure);
         strcat(REQUEST, REQUEST2);
+        // printf("%s", REQUEST);
         if(write(s, REQUEST, strlen(REQUEST)) < 0) {
             ESP_LOGE(TAG, "... socket send failed");
             close(s);
@@ -414,8 +417,8 @@ void hapticFunc(void *arg) {
 
     unsigned long int tmp_raw = (raw[3] << 12) | (raw[4] << 4) | (raw[5] >> 4);
     unsigned long int hum_raw = (raw[6] << 8) | raw[7];
-    printf("%d, %d, %d\n", raw[3], raw[4], raw[5]);
-    printf("%d, %d\n", raw[6], raw[7]);
+    // printf("%d, %d, %d\n", raw[3], raw[4], raw[5]);
+    // printf("%d, %d\n", raw[6], raw[7]);
 
     // calibration
     uint8_t data[33];
@@ -454,11 +457,13 @@ void hapticFunc(void *arg) {
     signed long int tmp = calibration_T(tmp_raw);
     signed long int hum = calibration_H(hum_raw);
 
-    tmp_w = (double)tmp / 100.0;
-    hum_w = (double)hum / 1024.0;
+    tmp_w = tmp;
+    hum_w = hum;
+    // tmp_w = (double)tmp / 100.0;
+    // hum_w = (double)hum / 1024.0;
 
-    printf("tmp = %f\n", tmp_w);
-    printf("hum = %f\n", hum_w);
+    printf("tmp = %f\n", (double)tmp_w / 100.0);
+    printf("hum = %f\n", (double)hum_w / 1024.0);
 }
 
 #ifndef USE_TIMER
